@@ -10,6 +10,7 @@ namespace BOB
 	public class BuildingPropReference
 	{
 		public BuildingInfo building;
+		public int subBuilding;
 		public int propIndex;
 		public float radAngle;
 		public Vector3 postion;
@@ -25,14 +26,17 @@ namespace BOB
 		// Master dictionary of replaced prop references.
 		internal static Dictionary<BuildingInfo, Dictionary<PrefabInfo, BOBBuildingReplacement>> replacements;
 
+		// Sub-building dictionary.
+		private static Dictionary<BuildingInfo, BuildingInfo> subBuildings;
 
 
 		/// <summary>
-		/// Performs setup and initialises the master dictionary.  Must be called prior to use.
+		/// Performs setup and initialises the dictionaries.  Must be called prior to use.
 		/// </summary>
 		internal static void Setup()
 		{
 			replacements = new Dictionary<BuildingInfo, Dictionary<PrefabInfo, BOBBuildingReplacement>>();
+			subBuildings = new Dictionary<BuildingInfo, BuildingInfo>();
 		}
 
 
@@ -204,6 +208,50 @@ namespace BOB
 			replacements[building][target].replacementInfo = replacement;
 			replacements[building][target].replacement = replacement.name;
 
+			// Get props from building.
+			FindBuildingProps(building, -1, target, building);
+
+			// Get props from sub-buildings.
+			for (int i = 0; i < building.m_subBuildings.Length; ++i)
+            {
+				FindBuildingProps(building.m_subBuildings[i].m_buildingInfo, i, target, building);
+
+				// Add sub-building to sub-buildings dictionary.
+				AddSubBuilding(building.m_subBuildings[i].m_buildingInfo, building);
+            }
+
+			// Now, iterate through each entry found.
+			foreach (BuildingPropReference propReference in replacements[building][target].references)
+			{
+				// Reset any all-building replacements first.
+				AllBuildingReplacement.RemoveEntry(propReference.building, target, propReference.propIndex);
+
+				// Apply the replacement.
+				ReplaceProp(replacements[building][target], propReference);
+			}
+		}
+
+
+		private static void AddSubBuilding(BuildingInfo subBuilding, BuildingInfo parent)
+        {
+			if (!subBuildings.ContainsKey(subBuilding))
+            {
+				subBuildings.Add(subBuilding, parent);
+            }
+			else
+            {
+				if (subBuildings[subBuilding] != parent)
+                {
+					Logging.Error("attempt to assign sub-building ", subBuilding.name, " to more than one parent - ", subBuildings[subBuilding].name, " and ", parent.name);
+                }
+            }
+        }
+
+
+		private static void FindBuildingProps(BuildingInfo building, int subBuilding, PrefabInfo target, BuildingInfo parent)
+        {
+			Logging.Message("checking sub-building ", subBuilding.ToString(), " with ", building.m_props.Length.ToString(), " props");
+
 			// Iterate through each prop in building.
 			for (int propIndex = 0; propIndex < building.m_props.Length; ++propIndex)
 			{
@@ -233,36 +281,57 @@ namespace BOB
 				if (thisProp != null && thisProp == target)
 				{
 					// Match!  Add reference data to the list.
-					replacements[building][target].references.Add(new BuildingPropReference
+					replacements[parent][target].references.Add(new BuildingPropReference
 					{
 						building = building,
+						subBuilding = subBuilding,
 						propIndex = propIndex,
 						radAngle = building.m_props[propIndex].m_radAngle,
 						postion = building.m_props[propIndex].m_position,
 						probability = building.m_props[propIndex].m_probability
 					});
+
+					Logging.Message("found prop at index ", propIndex.ToString(), " in sub-building ", subBuilding.ToString());
 				}
-			}
-
-			// Now, iterate through each entry found.
-			foreach (BuildingPropReference propReference in replacements[building][target].references)
-			{
-				// Reset any all-building replacements first.
-				AllBuildingReplacement.RemoveEntry(building, target, propReference.propIndex);
-
-				// Apply the replacement.
-				ReplaceProp(replacements[building][target], propReference);
 			}
 		}
 
 
 		/// <summary>
-		/// Checks if there's a currently active building replacement applied to the given building prop index, and if so, returns the *original* prefab.
+		/// Checks if there's a currently active building replacement applied to the given building and prop index, and if so, returns the *original* prefab.
+		/// This will work if either a main building or sub-building info is passed.
 		/// </summary>
 		/// <param name="buildingPrefab">Building prefab to check</param>
 		/// <param name="propIndex">Prop index to check</param>
 		/// <returns>Original prefab if a building replacement is currently applied, null if no building replacement is currently applied</returns>
 		internal static PrefabInfo GetOriginal(BuildingInfo buildingPrefab, int propIndex)
+        {
+			if (buildingPrefab != null && subBuildings.ContainsKey(buildingPrefab))
+            {
+				BuildingInfo parentBuilding = subBuildings[buildingPrefab];
+				for (int i = 0; i < parentBuilding.m_subBuildings.Length; ++i)
+                {
+					if (parentBuilding.m_subBuildings[i].m_buildingInfo == buildingPrefab)
+                    {
+						return GetOriginal(parentBuilding, i, propIndex);
+                    }
+                }
+            }
+
+			// If we got here, no sub-building entry was found - assume main building info.
+			return GetOriginal(buildingPrefab, -1, propIndex);
+		}
+
+
+		/// <summary>
+		/// Checks if there's a currently active building replacement applied to the given building, using the given sub-building and prop index, and if so, returns the *original* prefab.
+		/// Only works for parent building infos; it will not detect anything if a sub-building info is passed directly.
+		/// </summary>
+		/// <param name="buildingPrefab">Building prefab to check</param>
+		/// <param name="subBuilding">Sub-building index to check (use -1 for the main buildingInfo)</param>
+		/// <param name="propIndex">Prop index to check</param>
+		/// <returns>Original prefab if a building replacement is currently applied, null if no building replacement is currently applied</returns>
+		internal static PrefabInfo GetOriginal(BuildingInfo buildingPrefab, int subBuilding, int propIndex)
 		{
 			// Safety check.
 			if (buildingPrefab != null && replacements.ContainsKey(buildingPrefab))
@@ -274,11 +343,15 @@ namespace BOB
 					// Iterate through each prop reference in this entry.
 					foreach (BuildingPropReference propRef in reference.references)
 					{
-						// Check for a building and prop index match.
-						if (propRef.building == buildingPrefab && propRef.propIndex == propIndex)
+						// Check for an index match.
+						if (propRef.propIndex == propIndex)
 						{
-							// Match!  Return the original prefab.
-							return target;
+							// Check for a building/sub-building match.
+							if (propRef.building == (subBuilding < 0 ? buildingPrefab : buildingPrefab.m_subBuildings[subBuilding].m_buildingInfo))
+							{
+								// Match!  Return the original prefab.
+								return target;
+							}
 						}
 					}
 				}
@@ -293,9 +366,10 @@ namespace BOB
 		/// Checks if there's a currently active building replacement applied to the given building prop index, and if so, returns the replacement record.
 		/// </summary>
 		/// <param name="buildingPrefab">Building prefab to check</param>
+		/// <param name="subBuilding">Sub-building index to check</param>
 		/// <param name="propIndex">Prop index to check</param>
 		/// <returns>Replacement record if a building replacement is currently applied, null if no building replacement is currently applied</returns>
-		internal static BOBBuildingReplacement ActiveReplacement(BuildingInfo buildingPrefab, int propIndex)
+		internal static BOBBuildingReplacement ActiveReplacement(BuildingInfo buildingPrefab, int subBuilding, int propIndex)
 		{
 			// Safety check.
 			if (buildingPrefab != null && replacements.ContainsKey(buildingPrefab))
@@ -304,11 +378,12 @@ namespace BOB
 				foreach (PrefabInfo target in replacements[buildingPrefab].Keys)
 				{
 					BOBBuildingReplacement reference = replacements[buildingPrefab][target];
+
 					// Iterate through each building reference in this entry.
 					foreach (BuildingPropReference propRef in reference.references)
 					{
 						// Check for a building and prop index match.
-						if (propRef.building == buildingPrefab && propRef.propIndex == propIndex)
+						if ((propRef.building == (subBuilding < 0 ? buildingPrefab : buildingPrefab.m_subBuildings[subBuilding].m_buildingInfo)) && propRef.propIndex == propIndex)
 						{
 							// Match!  Return the original prefab.
 							return replacements[buildingPrefab][target];
@@ -337,22 +412,27 @@ namespace BOB
 				z = buildingElement.offsetZ
 			};
 
-			// Apply replacement.
-			if (buildingElement.replacementInfo is PropInfo)
+			// Get local reference.
+			BuildingInfo.Prop target = propReference.building.m_props[propReference.propIndex];
+
+			// Tree or prop?
+			if (buildingElement.replacementInfo is TreeInfo)
 			{
-				propReference.building.m_props[propReference.propIndex].m_finalProp = (PropInfo)buildingElement.replacementInfo;
+				// Tree.
+				target.m_finalTree = (TreeInfo)buildingElement.replacementInfo;
 			}
 			else
 			{
-				propReference.building.m_props[propReference.propIndex].m_finalTree = (TreeInfo)buildingElement.replacementInfo;
+				// Prop.
+				target.m_finalProp = (PropInfo)buildingElement.replacementInfo;
 			}
 
 			// Angle and offset.
-			propReference.building.m_props[propReference.propIndex].m_radAngle = propReference.radAngle + ((buildingElement.angle * Mathf.PI) / 180f);
-			propReference.building.m_props[propReference.propIndex].m_position = propReference.postion + offset;
+			target.m_radAngle = propReference.radAngle + ((buildingElement.angle * Mathf.PI) / 180f);
+			target.m_position = propReference.postion + offset;
 
 			// Probability.
-			propReference.building.m_props[propReference.propIndex].m_probability = buildingElement.probability;
+			target.m_probability = buildingElement.probability;
 
 			// Refresh builidng render.
 			RefreshBuilding(propReference.building);
@@ -412,7 +492,7 @@ namespace BOB
 				// Make sure that this is a valid building, and one that matches our target.
 				if (building.m_flags != Building.Flags.None && building.Info == buildingPrefab)
 				{
-					// Match - update building render.
+					// Match - update building render (this also updates sub-buildings).
 					BuildingManager.instance.UpdateBuildingRenderer(i, true);
 				}
 			}

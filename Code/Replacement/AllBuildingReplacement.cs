@@ -42,32 +42,37 @@ namespace BOB
 		/// <summary>
 		/// Reverts an all-building replacement.
 		/// </summary>
-		/// <param name="target">Targeted (original) tree/prop prefab</param>
+		/// <param name="targetInfo">Targeted (original) tree/prop prefab</param>
 		/// <param name="removeEntries">True (default) to remove the reverted entries from the master dictionary, false to leave the dictionary unchanged</param>
 		/// <returns>True if the entire building record was removed from the dictionary (due to no remaining replacements for that prefab), false if the prefab remains in the dictionary (has other active replacements)</returns>
-		internal static void Revert(PrefabInfo target, bool removeEntries = true)
+		internal static void Revert(PrefabInfo targetInfo, bool removeEntries = true)
 		{
 			// Iterate through each entry in our dictionary.
-			foreach (BuildingPropReference propReference in replacements[target].references)
+			foreach (BuildingPropReference propReference in replacements[targetInfo].references)
 			{
-				// Revert entry.
-				if (target is PropInfo)
+				// Revert entry - get local reference.
+				BuildingInfo.Prop target = propReference.building.m_props[propReference.propIndex];
+
+				// Tree or prop?
+				if (targetInfo is TreeInfo)
 				{
-					propReference.building.m_props[propReference.propIndex].m_finalProp = (PropInfo)target;
+					// Tree.
+					target.m_finalTree = (TreeInfo)targetInfo;
 				}
 				else
 				{
-					propReference.building.m_props[propReference.propIndex].m_finalTree = (TreeInfo)target;
+					// Prop.
+					target.m_finalProp = (PropInfo)targetInfo;
 				}
-				propReference.building.m_props[propReference.propIndex].m_radAngle = propReference.radAngle;
-				propReference.building.m_props[propReference.propIndex].m_position = propReference.postion;
-				propReference.building.m_props[propReference.propIndex].m_probability = propReference.probability;
+				target.m_radAngle = propReference.radAngle;
+				target.m_position = propReference.postion;
+				target.m_probability = propReference.probability;
 			}
 
 			// Remove entry from dictionary, if we're doing so.
 			if (removeEntries)
 			{
-				replacements.Remove(target);
+				replacements.Remove(targetInfo);
 			}
 		}
 
@@ -81,6 +86,8 @@ namespace BOB
 		/// <param name="propIndex">Prop index</param>
 		internal static void RemoveEntry(BuildingInfo buildingPrefab, PrefabInfo target, int propIndex)
 		{
+			Logging.Message("removing all-building entry for prop ", target.name, " from ", buildingPrefab.name, " at index ", propIndex.ToString());
+
 			// Check to see if we have an entry for this prefab.
 			if (replacements.ContainsKey(target))
 			{

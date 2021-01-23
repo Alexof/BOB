@@ -51,7 +51,7 @@ namespace BOB
 
 						angleField.text = thisReplacement.angle.ToString();
 						xField.text = thisReplacement.offsetX.ToString();
-						yField.text = thisReplacement.offsetY.ToString();	
+						yField.text = thisReplacement.offsetY.ToString();
 						zField.text = thisReplacement.offsetZ.ToString();
 						probabilityField.text = thisReplacement.probability.ToString();
 					}
@@ -90,9 +90,9 @@ namespace BOB
 					}
 				}
 				catch (Exception e)
-                {
+				{
 					Logging.LogException(e, "exception accessing current target item ");
-                }
+				}
 			}
 		}
 
@@ -188,13 +188,13 @@ namespace BOB
 
 				// Toggle replace all button visibility.
 				if (isChecked)
-                {
+				{
 					replaceAllButton.Hide();
-                }
+				}
 				else
-                {
+				{
 					replaceAllButton.Show();
-                }
+				}
 			};
 
 			// Replace button event handler.
@@ -253,9 +253,9 @@ namespace BOB
 			{
 				// Saftey net - don't do anything if individual check is selected.
 				if (indCheck.isChecked)
-                {
+				{
 					return;
-                }
+				}
 
 				// Try to parse text fields.
 				float angle, xOffset, yOffset, zOffset;
@@ -393,15 +393,48 @@ namespace BOB
 				return new FastList<object>();
 			}
 
+			GetPropListItems(currentBuilding, -1, isTree, propList);
+
+			// Iterate through sub-buildings.
+			for (int subBuilding = 0; subBuilding < currentBuilding.m_subBuildings.Length; subBuilding++)
+			{
+				GetPropListItems(currentBuilding, subBuilding, isTree, propList);
+			}
+
+			// Create return fastlist from our filtered list, ordering by name.
+			FastList<object> fastList = new FastList<object>();
+			fastList.m_buffer = propList.ToArray();
+			fastList.m_size = propList.Count;
+
+			// If the list is empty, show the 'no props' label; otherwise, hide it.
+			if (fastList.m_size == 0)
+			{
+				noPropsLabel.Show();
+			}
+			else
+			{
+				noPropsLabel.Hide();
+			}
+
+			return fastList;
+		}
+
+
+		private void GetPropListItems(BuildingInfo building, int subBuilding, bool isTree, List<PropListItem> propList)
+        {
+			Logging.Message("GetPropListItem with subBuilding ", subBuilding.ToString());
+
+			BuildingInfo subBuildingInfo = subBuilding < 0 ? building : building.m_subBuildings[subBuilding].m_buildingInfo;
+
 
 			// Iterate through each prop in building.
-			for (int propIndex = 0; propIndex < currentBuilding.m_props.Length; ++propIndex)
+			for (int propIndex = 0; propIndex < subBuildingInfo.m_props.Length; ++propIndex)
 			{
 				// Create new list item.
-				PropListItem propListItem = new PropListItem();
+				PropListItem propListItem = new PropListItem {subBuilding = subBuilding};
 
 				// Try to get relevant prefab (prop/tree), using finalProp.
-				PrefabInfo finalInfo = isTree ? (PrefabInfo)currentBuilding.m_props[propIndex]?.m_finalTree : (PrefabInfo)currentBuilding.m_props[propIndex]?.m_finalProp;
+				PrefabInfo finalInfo = isTree ? (PrefabInfo)subBuildingInfo.m_props[propIndex]?.m_finalTree : (PrefabInfo)subBuildingInfo.m_props[propIndex]?.m_finalProp;
 
 				// Check to see if we were succesful - if not (e.g. we only want trees and this is a prop), continue on to next building prop.
 				if (finalInfo?.name == null)
@@ -423,12 +456,14 @@ namespace BOB
 				}
 
 				// Get original (pre-replacement) tree/prop prefab and current probability (as default original probability).
-				propListItem.originalPrefab = BuildingReplacement.GetOriginal(currentBuilding, propIndex) ?? AllBuildingReplacement.GetOriginal(currentBuilding, propIndex) ?? finalInfo;
-				propListItem.originalProb = currentBuilding.m_props[propIndex].m_probability;
-				propListItem.originalAngle = (currentBuilding.m_props[propIndex].m_radAngle * 180f) / Mathf.PI;
+				propListItem.originalPrefab = BuildingReplacement.GetOriginal(building, subBuilding, propIndex) ?? AllBuildingReplacement.GetOriginal(building, propIndex) ?? finalInfo;
+				Logging.Message("originalPrefab is ", propListItem.originalPrefab.name);
+
+				propListItem.originalProb = subBuildingInfo.m_props[propIndex].m_probability;
+				propListItem.originalAngle = (subBuildingInfo.m_props[propIndex].m_radAngle * 180f) / Mathf.PI;
 
 				// All-building replacement and original probability (if any).
-				BOBBuildingReplacement allBuildingReplacement = AllBuildingReplacement.ActiveReplacement(currentBuilding, propIndex);
+				BOBBuildingReplacement allBuildingReplacement = AllBuildingReplacement.ActiveReplacement(subBuildingInfo, propIndex);
 				if (allBuildingReplacement != null)
 				{
 					propListItem.allPrefab = allBuildingReplacement.replacementInfo;
@@ -436,7 +471,7 @@ namespace BOB
 				}
 
 				// Building replacement and original probability (if any).
-				BOBBuildingReplacement buildingReplacement = BuildingReplacement.ActiveReplacement(currentBuilding, propIndex);
+				BOBBuildingReplacement buildingReplacement = BuildingReplacement.ActiveReplacement(building, subBuilding, propIndex);
 				if (buildingReplacement != null)
 				{
 					propListItem.replacementPrefab = buildingReplacement.replacementInfo;
@@ -444,7 +479,7 @@ namespace BOB
 				}
 
 				// Building replacement and original probability (if any).
-				BOBBuildingReplacement individualReplacement = IndividualReplacement.ActiveReplacement(currentBuilding, propIndex);
+				BOBBuildingReplacement individualReplacement = IndividualReplacement.ActiveReplacement(subBuildingInfo, propIndex);
 				if (individualReplacement != null)
 				{
 					propListItem.individualPrefab = individualReplacement.replacementInfo;
@@ -483,23 +518,6 @@ namespace BOB
 				// Add this item to our list.
 				propList.Add(propListItem);
 			}
-
-			// Create return fastlist from our filtered list, ordering by name.
-			FastList<object> fastList = new FastList<object>();
-			fastList.m_buffer = propList.ToArray();
-			fastList.m_size = propList.Count;
-
-			// If the list is empty, show the 'no props' label; otherwise, hide it.
-			if (fastList.m_size == 0)
-			{
-				noPropsLabel.Show();
-			}
-			else
-			{
-				noPropsLabel.Hide();
-			}
-
-			return fastList;
 		}
 	}
 }

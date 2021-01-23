@@ -29,6 +29,9 @@ namespace BOB
 		// Current package replacement (if any).
 		public PrefabInfo packagePrefab;
 
+		// Sub-building.
+		public int subBuilding;
+
 		// Single index.
 		public int index;
 

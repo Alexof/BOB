@@ -75,7 +75,10 @@ namespace BOB
 	}
 
 	public class BOBBuildingReplacement : BOBNetReplacement
-    {
+	{
+		[XmlAttribute("sub-building")]
+		public int subBuilding = -1;
+
 		[XmlAttribute("index")]
 		public int index = -1;
 
